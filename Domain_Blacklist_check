@@ -1,0 +1,425 @@
+#!/bin/sh
+# Linux/UNIX blcheck_cmk
+# File location /opt/omd/sites/denver_dc/local/bin/blcheck_cmk
+# This file tests a domain name against more then 116 black lists.
+#
+
+#Reference URL
+# https://github.com/adionditsak/blacklist-check-unix-linux-utility/blob/master/bl
+# https://gist.github.com/agarzon/5554490
+# https://www.saotn.org/bash-check-ip-address-blacklist-status/
+# http://daemonforums.org/showthread.php?t=302
+#===============================================================================
+HOST_NAME=$1
+# Config {
+
+
+    # How many tries and for how long to wait for DNS queries
+    CONF_DNS_TRIES=2
+    CONF_DNS_DURATION=3
+
+    # Blacklists to check
+    CONF_BLACKLISTS="
+        0spam-killlist.fusionzero.com
+        0spam.fusionzero.com
+        access.redhawk.org
+        all.rbl.jp
+        all.spam-rbl.fr
+        all.spamrats.com
+        b.barracudacentral.org
+        backscatter.spameatingmonkey.net
+        badnets.spameatingmonkey.net
+        bb.barracudacentral.org
+        bl.drmx.org
+        bl.konstant.no
+        bl.nszones.com
+        bl.spamcannibal.org
+        bl.spameatingmonkey.net
+        bl.spamstinks.com
+        black.junkemailfilter.com
+        blackholes.five-ten-sg.com
+        blacklist.sci.kun.nl
+        blacklist.woody.ch
+        bogons.cymru.com
+        bsb.empty.us
+        bsb.spamlookup.net
+        cart00ney.surriel.com
+        cbl.abuseat.org
+        cbl.anti-spam.org.cn
+        cblless.anti-spam.org.cn
+        cblplus.anti-spam.org.cn
+        cdl.anti-spam.org.cn
+        cidr.bl.mcafee.com
+        combined.rbl.msrbl.net
+        db.wpbl.info
+        dev.null.dk
+        dialups.visi.com
+        dnsbl-0.uceprotect.net
+        dnsbl-1.uceprotect.net
+        dnsbl-2.uceprotect.net
+        dnsbl-3.uceprotect.net
+        dnsbl.anticaptcha.net
+        dnsbl.aspnet.hu
+        dnsbl.inps.de
+        dnsbl.justspam.org
+        dnsbl.kempt.net
+        dnsbl.madavi.de
+        dnsbl.rizon.net
+        dnsbl.rv-soft.info
+        dnsbl.rymsho.ru
+        dnsbl.sorbs.net
+        spam.dnsbl.sorbs.net
+        dnsbl.zapbl.net
+        dnsrbl.swinog.ch
+        dul.pacifier.net
+        dyn.nszones.com
+        dyna.spamrats.com
+        fnrbl.fast.net
+        fresh.spameatingmonkey.net
+        hostkarma.junkemailfilter.com
+        images.rbl.msrbl.net
+        ips.backscatterer.org
+        ix.dnsbl.manitu.net
+        korea.services.net
+        list.bbfh.org
+        list.blogspambl.com
+        mail-abuse.blacklist.jippg.org
+        netbl.spameatingmonkey.net
+        netscan.rbl.blockedservers.com
+        no-more-funn.moensted.dk
+        noptr.spamrats.com
+        orvedb.aupads.org
+        pbl.spamhaus.org
+        phishing.rbl.msrbl.net
+        pofon.foobar.hu
+        psbl.surriel.com
+        rbl.abuse.ro
+        rbl.blockedservers.com
+        rbl.dns-servicios.com
+        rbl.efnet.org
+        rbl.efnetrbl.org
+        rbl.iprange.net
+        rbl.schulte.org
+        rbl.talkactive.net
+        rbl2.triumf.ca
+        rsbl.aupads.org
+        sbl.nszones.com
+        short.rbl.jp
+        spam.dnsbl.anonmails.de
+        spam.pedantic.org
+        spam.rbl.blockedservers.com
+        spam.rbl.msrbl.net
+        spam.spamrats.com
+        spamrbl.imp.ch
+        spamsources.fabel.dk
+        st.technovision.dk
+        tor.dan.me.uk
+        tor.dnsbl.sectoor.de
+        tor.efnet.org
+        torexit.dan.me.uk
+        truncate.gbudb.net
+        ubl.unsubscore.com
+        uribl.spameatingmonkey.net
+        urired.spameatingmonkey.net
+        virbl.dnsbl.bit.nl
+        virus.rbl.jp
+        virus.rbl.msrbl.net
+        vote.drbl.caravan.ru
+        vote.drbl.gremlin.ru
+        web.rbl.msrbl.net
+        work.drbl.caravan.ru
+        work.drbl.gremlin.ru
+        wormrbl.imp.ch
+        zen.spamhaus.org"
+# ----------------------------------------------------------------------------#
+# Removed lists.
+#        sbl-xbl.spamhaus.org
+#        sbl.spamhaus
+#        xbl.spamhaus.org.org
+#        aspews.ext.sorbs.net
+#        l2.bbfh.ext.sorbs.net
+#        l3.bbfh.ext.sorbs.net
+#        l4.bbfh.ext.sorbs.net
+
+
+#~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ }
+
+
+# Definitions {
+
+    # Common regular expressions
+    REGEX_IP='\([0-9]\{1,3\}\)\.\([0-9]\{1,3\}\)\.\([0-9]\{1,3\}\)\.\([0-9]\{1,3\}\)'
+    REGEX_DOMAIN='\([a-zA-Z0-9]\+\(-[a-zA-Z0-9]\+\)*\.\)\+[a-zA-Z]\{2,\}'
+    REGEX_TDL='\([a-zA-Z0-9]\+\(-[a-zA-Z0-9]\+\)*\.\)[a-zA-Z]\{2,\}$'
+
+    # Colors
+    RED=$(tput setaf 1)
+    GREEN=$(tput setaf 2)
+    YELLOW=$(tput setaf 3)
+    CLEAR=$(tput sgr0)
+
+
+#~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ }
+
+# simple shell function to show an error message and exit
+#  $0  : the name of shell script, $1 is the string passed as argument
+# >&2  : redirect/send the message to stderr
+
+# Macros {
+    # Error handling
+    error() {
+        echo "ERROR: $1" >&2
+        exit 2
+    }
+
+    # Resolve the IP
+    resolve() {
+        # IP already?
+        IP=$(echo "$1" | grep "^$REGEX_IP$")
+        if [ "$IP" ]; then
+            echo "$IP"
+        # Resolve domain
+        else
+            # Handle special resolve types
+            case "$2" in
+                "ns" ) TYPE="ns"; REGEX="$REGEX_DOMAIN\.$";;
+                   * ) TYPE="a";  REGEX="$REGEX_IP$";;
+            esac
+
+            case "$CMD" in
+                $CMD_DIG ) "$CMD" +short -t "$TYPE" +time=$CONF_DNS_DURATION +tries=$CONF_DNS_TRIES "$1" | grep -om 1 "$REGEX";;
+                $CMD_HOST ) "$CMD" -t "$TYPE" -W $CONF_DNS_DURATION -R $CONF_DNS_TRIES "$1" | grep -om 1 "$REGEX";;
+            esac
+        fi
+    }
+
+#~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ }
+
+# Get the command we will use: dig or host
+CMD_DIG=$(which dig)
+CMD_HOST=$(which host)
+if [ "$CMD_DIG" ]; then
+    CMD=$CMD_DIG
+elif [ "$CMD_HOST" ]; then
+    CMD=$CMD_HOST
+fi
+if [ ! "$CMD" ]; then
+    error "Either dig or host command is required."
+fi
+
+# ----------------------------------------------------------------------------#
+# Parse IP
+IP=$(resolve "$HOST_NAME")
+# Check_mk
+# echo 0 produces a ok message
+# echo 1 produces a warning message
+# echo 2 produces a critical message
+if [ ! "$IP" ];
+        then
+        echo "<<<local>>>"
+        echo "1 DNS_Lookup - WARN - No DNS record found for $HOST_NAME"
+else
+        echo "<<<local>>>"
+        echo "0 DNS_Lookup - OK - $HOST_NAME, resolved to $IP"
+fi
+# ----------------------------------------------------------------------------#
+# Reverse the IP
+REVERSED=$(echo "$IP" | sed -ne "s~^$REGEX_IP$~\4.\3.\2.\1~p")
+
+# Get the PTR
+case "$CMD" in
+    $CMD_DIG ) PTR=$("$CMD" +short -x "$IP" | sed s/\.$//);;
+    $CMD_HOST ) PTR=$("$CMD" "$IP" | grep -o '[^ ]\+$' | sed s/\.$//)
+esac
+# ----------------------------------------------------------------------------#
+# Check PTR record
+#if [ $CMD_DIG -eq $HOST_NAME ] || [ $CMD_HOST -eq $HOST_NAME ];
+#if [ $CMD_HOST = $HOST_NAME ] || [ $CMD_DIG = $HOST_NAME ];
+#       then
+#       echo "<<<local>>>"
+#       echo "0 PTR_Record - OK - Domain - $DOMAIN PTR - $PTR, matches dns domain $HOST_NAME"
+#else
+#       echo "<<<local>>>"
+#       echo "1 PTR_Record - WARN - Domain - $CMD_HOST PTR - $PTR, does not match dns domain $HOST_NAME"
+#fi
+# ----------------------------------------------------------------------------#
+DOMAIN_NAME=$(echo ${HOST_NAME#mail.})
+
+# Check Mail DNS records for SPF, DKIM and DMARC
+# Get SPF Record
+SPF=$("$CMD_DIG" TXT "$DOMAIN_NAME" | sed -e '/^$/d; /^;/d')
+if [ -n "$SPF" ];
+        then
+        echo "<<<local>>>"
+        echo "0 SPF_Record - OK - $SPF"
+else
+        echo "<<<local>>>"
+        echo "1 SPF_Record - WARN - No SPF Record found"
+fi
+# ----------------------------------------------------------------------------#
+# Get DKIM Record
+#dig TXT dkim._domainkey.DOMAIN_NAME
+dkim=dkim_domainkey.
+DKIM_HOST=$dkim$DOMAIN_NAME
+DKIM=$("$CMD_DIG" TXT "$DKIM_HOST" | sed -e '/^$/d; /^;/d')
+if [ -n "$DKIM" ];
+        then
+        echo "<<<local>>>"
+        echo "0 DKIM_Record - OK - $DKIM"
+else
+        echo "<<<local>>>"
+        echo "1 DKIM_Record - WARN - No DKIM Record found"
+fi
+# ----------------------------------------------------------------------------#
+# Get DMARC Record
+dmarc=_dmarc.
+DMARC_HOST=$dmarc$DOMAIN_NAME
+DMARC=$("$CMD_DIG" TXT "$DMARC_HOST" | sed -e '/^$/d; /^;/d')
+if [ -n "$DMARC" ];
+        then
+        echo "<<<local>>>"
+        echo "0 DMARC_Record - OK - $DMARC"
+else
+        echo "<<<local>>>"
+        echo "1 DMARC_Record - WARN - No DMARC Record found"
+fi
+# ----------------------------------------------------------------------------#
+# If DKIM and DMARC match
+if [ "$DKIM" != "$DMARC" ];
+        then
+        echo "<<<local>>>"
+        echo "0 DMARC_DKIM - OK - DMARC and DKIM don't match nothing wrong"
+else
+        echo "<<<local>>>"
+        echo "1 DMARC_DKIM - WARN - DMARC and DKIM match, please fix"
+fi
+# ----------------------------------------------------------------------------#
+# Check status of port 110
+#CMD_NMAP=$(which nmap)
+#NMAP110=$("$CMD_NMAP" -p 110 "$HOST_NAME" | sed -ne '/110/p')
+
+#if [ "$NMAP110" = "110/tcp open  pop3" ];
+#       then
+#       echo "<<<local>>>"
+#       echo "0 PORT_110_new - OK - $NMAP110 - open"
+#else
+#       echo "<<<local>>>"
+#       echo "1 PORT_110_new - WARN - $NMAP110 - closed"
+#fi
+# ----------------------------------------------------------------------------#
+# Filter out the blacklists for domain name.
+BLACKLISTS=""
+for BL in $CONF_BLACKLISTS; do
+    if [ "$BL" ]; then
+
+        # Make sure the domain is a proper one
+        DOMAIN=$(echo "$BL" | sed -e 's/^[ \t]*//' | grep ^"$REGEX_DOMAIN"$)
+        if [ ! "$DOMAIN" ]; then
+            echo "Blacklist $BL is not valid"
+        else
+            # It is a proper blacklist
+            if [ "$BLACKLISTS" ]; then
+                BLACKLISTS=$(echo -e "$BLACKLISTS\n$DOMAIN")
+            else
+                BLACKLISTS="$BL"
+            fi
+        fi
+    fi
+done
+
+# Make sure we have at least one blacklist
+COUNT=$(($(echo "$BLACKLISTS" | wc -l)))
+if [ ! "$BLACKLISTS" ] || [ "$COUNT" -eq 0 ]; then
+    error "No blacklists have been specified"
+fi
+
+# Initialize the counters
+INVALID=0
+PASSED=0
+FAILED=0
+# ----------------------------------------------------------------------------#
+# Interate over all blacklists
+I=0;
+for BL in $BLACKLISTS; do
+    PREFIX=
+    I=$((I + 1))
+    # What should we test
+    TEST="$REVERSED.$BL."
+
+    # Get the status
+    RESPONSE=$(resolve "$TEST")
+    START=$(echo "$RESPONSE" | cut -c1-4)
+
+# Not blacklisted
+# If response is false
+    if [ ! "$RESPONSE" ]; then
+                # Make sure the server is viable
+        ERROR=""
+        if [ "$VERIFY_BL" ]; then
+            TDL=$(echo "$BL" | grep -om 1 '\([a-zA-Z0-9]\+\(-[a-zA-Z0-9]\+\)*\.\)[a-zA-Z]\{2,\}$')
+            if [ ! "$(resolve "$TDL" ns)" ]; then
+                INVALID=$((INVALID + 1))
+                ERROR=TRUE
+            fi
+        fi
+        fi
+
+# If Blacklisted
+        if [ "$START" = "127."  ];
+                then
+                FAILED=$((FAILED + 1))
+                else
+                PASSED=$((PASSED + 1))
+        fi
+        if [ "$FAILED" == "1" ];
+                then
+                        Site1=$(echo "$BL")
+                elif [ "$FAILED" == "2" ];
+                        then
+                        Site2=$(echo "$BL")
+                elif [ "$FAILED" == "3" ];
+                        then
+                        Site3=$(echo "$BL")
+                elif [ "$FAILED" == "4" ];
+                        then
+                        Site4=$(echo "$BL")
+                elif [ "$FAILED" == "5" ];
+                        then
+                        Site5=$(echo "$BL")
+                elif [ "$FAILED" == "6" ];
+                        then
+                        Site6=$(echo "$BL")
+                elif [ "$FAILED" == "7" ];
+                        then
+                        Site7=$(echo "$BL")
+                elif [ "$FAILED" == "8" ];
+                        then
+                        Site8=$(echo "$BL")
+                elif [ "$FAILED" == "9" ];
+                        then
+                        Site9=$(echo "$BL")
+                elif [ "$FAILED" == "10" ];
+                        then
+                        Site10=$(echo "$BL")
+                elif [ "$FAILED" -ge "11" ];
+                        then
+                        Site11="Too many to list here"
+        fi
+
+        #TDL_NEW=$(echo "$BL" | grep -om 1 '\([a-zA-Z0-9]\+\(-[a-zA-Z0-9]\+\)*\.\)[a-zA-Z]\{2,\}$')
+        #echo "TDL is $TDL_NEW"
+        #echo "---------------------------------"
+done
+# ----------------------------------------------------------------------------#
+
+if [ $FAILED -ge 1 ] && [ $FAILED -le 10 ]; then
+        echo "<<<local>>>"
+        echo "2 Blacklist - CRIT - Failed $FAILED sites, $Site1, $Site2, $Site3, $Site4, $Site5, $Site6, $Site7, $Site8, $Site9, $Site10"
+elif [ $FAILED -ge 11 ]; then
+        echo "<<<local>>>"
+        echo "2 Blacklist - WARN - Failed $FAILED sites, $Site11"
+elif [ $PASSED == $COUNT ]; then
+        echo "<<<local>>>"
+        echo "0 Blacklist - OK - Checked $COUNT sites for $HOST_NAME"
+fi
+#...................................................................
