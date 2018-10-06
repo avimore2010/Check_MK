@@ -1,0 +1,170 @@
+#!/bash/bin
+# input for the script is file name, that contains domain names line by line, and file store at same location
+FILE_NAME=$1
+
+#read a file line by line
+cat $FILE_NAME | while read LINE
+#for line in File_Name
+do
+
+#take a line as a hostname
+        HOST_NAME=$LINE
+        echo "Hostname: $HOST_NAME"
+
+# Config {
+
+
+    # How many tries and for how long to wait for DNS queries
+         CONF_DNS_TRIES=2
+         CONF_DNS_DURATION=3
+
+# Definitions {
+
+    # Common regular expressions
+         REGEX_IP='\([0-9]\{1,3\}\)\.\([0-9]\{1,3\}\)\.\([0-9]\{1,3\}\)\.\([0-9]\{1,3\}\)'
+         REGEX_DOMAIN='\([a-zA-Z0-9]\+\(-[a-zA-Z0-9]\+\)*\.\)\+[a-zA-Z]\{2,\}'
+         REGEX_TDL='\([a-zA-Z0-9]\+\(-[a-zA-Z0-9]\+\)*\.\)[a-zA-Z]\{2,\}$'
+
+#~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ }
+
+# simple shell function to show an error message and exit
+#  $0  : the name of shell script, $1 is the string passed as argument
+# >&2  : redirect/send the message to stderr
+
+# Macros {
+    # Error handling
+        error() {
+                echo "ERROR: $1" >&2
+                exit 2
+    }
+    # function for resolve IP
+    # Resolve the IP
+        resolve() {
+         # IP already?
+                IP=$(echo "$1" | grep "^$REGEX_IP$")
+                if [ "$IP" ]; then
+                        echo "$IP"
+        # Resolve domain
+                else
+            # Handle special resolve types
+                         case "$2" in
+                                "ns" ) TYPE="ns"; REGEX="$REGEX_DOMAIN\.$";;
+                           * ) TYPE="a";  REGEX="$REGEX_IP$";;
+                         esac
+
+                        case "$CMD" in
+                                $CMD_DIG ) "$CMD" +short -t "$TYPE" +time=$CONF_DNS_DURATION +tries=$CONF_DNS_TRIES "$1" | grep -om 1 "$REGEX";;
+                                 $CMD_HOST ) "$CMD" -t "$TYPE" -W $CONF_DNS_DURATION -R $CONF_DNS_TRIES "$1" | grep -om 1 "$REGEX";;
+                         esac
+                fi
+         }
+
+#~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ }
+
+# Get the command we will use: dig or host
+        CMD_DIG=$(which dig)
+        CMD_HOST=$(which host)
+                if [ "$CMD_DIG" ]; then
+                        CMD=$CMD_DIG
+                elif [ "$CMD_HOST" ]; then
+                        CMD=$CMD_HOST
+                fi
+        if [ ! "$CMD" ]; then
+                error "Either dig or host command is required."
+        fi
+
+# ----------------------------------------------------------------------------#
+# Parse IP
+        IP=$(resolve "$HOST_NAME")
+        echo "IP- $IP"
+# Check_mk
+# echo 0 produces a ok message
+# echo 1 produces a warning message
+# echo 2 produces a critical message
+        if [ ! "$IP" ];
+                then
+                echo "<<<local>>>"
+                 echo "1 DNS_Lookup - WARN - No DNS record found for $HOST_NAME"
+        else
+                echo "<<<local>>>"
+                echo "0 DNS_Lookup - OK - $HOST_NAME, resolved to $IP"
+        fi
+# ----------------------------------------------------------------------------#
+# Reverse the IP
+        REVERSED=$(echo "$IP" | sed -ne "s~^$REGEX_IP$~\4.\3.\2.\1~p")
+
+# Get the PTR
+        case "$CMD" in
+                $CMD_DIG ) PTR=$("$CMD" +short -x "$IP" | sed s/\.$//);;
+                $CMD_HOST ) PTR=$("$CMD" "$IP" | grep -o '[^ ]\+$' | sed s/\.$//)
+        esac
+#       echo "PTR- $PTR"
+# ----------------------------------------------------------------------------#
+# Check PTR record
+        PTR1=$("$CMD_DIG" -x "$IP" | sed -e '/^$/d; /^;/d'   )
+        #if [ $CMD_DIG -eq $HOST_NAME ] || [ $CMD_HOST -eq $HOST_NAME ];
+        if [ -n "$PTR1" ];
+                then
+                echo "<<<local>>>"
+                echo "0 PTR_Record - OK - Domain - $DOMAIN PTR - $PTR1, matches dns domain $HOST_NAME"
+        else
+                echo "<<<local>>>"
+                echo "1 PTR_Record - WARN - Domain - $CMD_HOST PTR - $PTR1, does not match dns domain $HOST_NAME"
+        fi
+# ----------------------------------------------------------------------------#
+        DOMAIN_NAME=$(echo ${HOST_NAME#mail.})
+
+# Check Mail DNS records for SPF, DKIM and DMARC
+# Get SPF Record
+        SPF=$("$CMD_DIG" TXT "$DOMAIN_NAME" | sed -e '/^$/d; /^;/d')
+        if [ -n "$SPF" ];
+                then
+                echo "<<<local>>>"
+                echo "0 SPF_Record - OK - $SPF"
+        else
+                echo "<<<local>>>"
+                echo "1 SPF_Record - WARN - No SPF Record found"
+        fi
+# ----------------------------------------------------------------------------#
+# Get DKIM Record
+#dig TXT dkim._domainkey.DOMAIN_NAME
+        dkim=dkim._domainkey.
+        DKIM_HOST=$dkim$DOMAIN_NAME
+        DKIM=$("$CMD_DIG" TXT "$DKIM_HOST" | sed -e '/^$/d; /^;/d')
+        if [ -n "$DKIM" ];
+                 then
+                echo "<<<local>>>"
+                echo "0 DKIM_Record - OK - $DKIM"
+        else
+                echo "<<<local>>>"
+        echo "1 DKIM_Record - WARN - No DKIM Record found"
+        fi
+# ----------------------------------------------------------------------------#
+# Get DMARC Record
+        dmarc=_dmarc.
+        DMARC_HOST=$dmarc$DOMAIN_NAME
+        DMARC=$("$CMD_DIG" TXT "$DMARC_HOST" | sed -e '/^$/d; /^;/d')
+        if [ -n "$DMARC" ];
+                then
+                echo "<<<local>>>"
+                echo "0 DMARC_Record - OK - $DMARC"
+        else
+                echo "<<<local>>>"
+                echo "1 DMARC_Record - WARN - No DMARC Record found"
+        fi
+# ----------------------------------------------------------------------------#
+# If DKIM and DMARC match
+        if [ "$DKIM" != "$DMARC" ];
+                then
+                echo "<<<local>>>"
+                echo "0 DMARC_DKIM - OK - DMARC and DKIM don't match nothing wrong"
+        else
+                echo "<<<local>>>"
+                echo "1 DMARC_DKIM - WARN - DMARC and DKIM match, please fix"
+        fi
+# ----------------------------------------------------------------------------#
+        echo
+        sleep 10s
+        echo
+done
+                                                
