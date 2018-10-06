@@ -1,0 +1,87 @@
+#!/usr/bin/python
+#Test script for Elastic Search Cluster Monitoring
+import urllib2
+import sys
+try:
+    import json
+except ImportError:
+    import simplejson as json
+critical=85 # critical value for JVM Heap Usage in %%
+warning=750 # JVM Heap Usage for JVM Heap Usage in %%
+#response = urllib.request.urlopen('http://es-001-us-004:9200/_cluster/health?pretty=true')
+host=sys.argv[1]
+port=9200
+try:
+		#For Cluster Health Hit the Cluster Health API
+        response = urllib2.urlopen(r'http://%s:%d/_cluster/health?pretty=true' % (host, port))
+		#for JVM Heap Usage Hit the nodes stats  API
+		response_jvm = urllib2.urlopen(r'http://%s:%d/_nodes/stats/jvm' % (host, port))
+		
+except urllib2.HTTPError, e:
+         print('unknown', ("API failure", None,
+                        "API failure:\n\n%s" % str(e)))
+except urllib2.URLError, e:
+         print('critical', (e.reason))
+
+response_body = response.read()
+response_jvm_body = response_jvm.read()
+try:
+        es_cluster_health = json.loads(response_body)
+		es_cluster_jvm = json.loads(response_jvm_body)
+		
+except ValueError:
+        print('unknown', ("API returned nonsense",))
+########### Cluster Health Finding #####################
+cluster_status = es_cluster_health['status'].lower()
+name=es_cluster_health['cluster_name']
+es_node=es_cluster_health['number_of_nodes']
+#es_dnode=es_cluster_health['number_of_data_nodes']
+print "<<<local>>>"
+print "0 ES_Cluster_Name - OK - Cluster Name:%s"%name
+
+if cluster_status == 'red':
+        print "<<<local>>>"
+        print "2 ES_Cluster_Health - CRITICAL - Cluster status is currently reporting as Red"
+elif cluster_status == 'yellow':
+        print "<<<local>>>"
+        print "1 ES_Cluster_Health - WARNING - Cluster status is currently reporting as Yellow"
+else:
+        print "<<<local>>>"
+        print "0 ES_Cluster_Health - OK - Cluster status is currently reporting as Green"
+
+print "<<<local>>>"
+print "0 ES_Cluster_Number_of_Nodes - OK - Number of Nodes:%s"%es_node
+##################### JVM Heap Usage Finding ###############################
+nodes = es_cluster_jvm['nodes']
+criticals = 0
+critical_details = []
+warnings = 0
+warning_details = []
+jvm_details = []
+#normals=0
+#normal=0
+#print(nodes)
+for node in nodes:
+        jvm_percentage = nodes[node]['jvm']['mem']['heap_used_percent']
+        node_name = nodes[node]['name']
+        if int(jvm_percentage) >= critical:
+                criticals = criticals + 1
+                critical_details.append("%s currently running at %s%% JVM mem "
+                                        % (node_name, jvm_percentage))
+        elif (int(jvm_percentage) >= warning and int(jvm_percentage) < critical):
+                warnings = warnings + 1
+                warning_details.append("%s currently running at %s%% JVM mem "
+                                       % (node_name, jvm_percentage))
+        #else:
+        #       normals = normals + 1
+        #       jvm_details.append("%s currently running at %s%% JVM mem " % (node_name, jvm_percentage))
+
+if criticals > 0:
+        print "<<<local>>>"
+        print("2 ES_Cluster_JVM_Usages - Critical - There are '%s' node(s) in the cluster that have breached the %% JVM heap usage c        ritical threshold of %s%%. They are:\r \t %s") % (criticals,critical,str("\r\t".join(critical_details)))
+elif warnings > 0:
+        print "<<<local>>>"
+        print("1 ES_Cluster_JVM_Usages - Warning - There are '%s' node(s) in the cluster that have breached the %% JVM mem usage war        ning threshold of %s%%. They are:\r \t %s") %(warnings, warning, str("\r\t".join(warning_details)))
+else:
+        print "<<<local>>>"
+        print("0 ES_Cluster_JVM_Usages - OK - All nodes in the cluster are currently below the % JVM mem warning threshold")
